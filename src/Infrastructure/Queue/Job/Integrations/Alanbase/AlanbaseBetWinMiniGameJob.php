@@ -1,0 +1,72 @@
+<?php
+
+namespace Integra\Infrastructure\Queue\Job\Integrations\Alanbase;
+
+use Integra\Domain\Integration\Alanbase\Operation\BetNew\Handler\BetWinMiniGameHandler;
+use Integra\Domain\Integration\Common\OperationHandlerInterface;
+use Integra\Infrastructure\Environment\Env;
+use Integra\Infrastructure\Http\Transport;
+use Integra\Infrastructure\Queue\Exception\LimitedRetryJobException;
+use Integra\Infrastructure\Queue\Job\Integrations\AbstractIntegrationJob;
+use Integra\Infrastructure\Queue\Job\Integrations\IntegrationJobInterface;
+use Integra\Models\Ubet\GameBet;
+use yii\helpers\StringHelper;
+use yii\queue\Queue;
+use Yii;
+
+class AlanbaseBetWinMiniGameJob extends AbstractIntegrationJob implements IntegrationJobInterface
+{
+    public string $clickId;
+    public int    $gameId;
+    public ?int $timeoutSeconds = null;
+
+    /**
+     * @inheritDoc
+     */
+    public function getQueueComponent(): Queue
+    {
+        return Yii::$app->queue_triggers_alanbase;
+    }
+
+    /**
+     * @inheritDoc
+     */
+    public function getPushDelaySeconds(): int
+    {
+        return (int)(new Env('UB_FIRST_TRY_DELAY'))->value();
+    }
+
+    /**
+     * @inheritDoc
+     */
+    protected function getRawParams(): array
+    {
+        $bet = GameBet::findOne(['bet_id' => $this->gameId]);
+
+        if(empty($bet)) {
+            $message = sprintf(
+                '[%s] Game Bet not found:: %s',
+                StringHelper::basename(static::class),
+                $this->gameId
+            );
+            Yii::error($message, __METHOD__);
+            throw new LimitedRetryJobException($message);
+        }
+
+        return [
+            'clickId' => $this->clickId,
+            'gameId' => $bet->bet_id,
+            'timeoutSeconds' => $this->timeoutSeconds,
+        ];
+    }
+
+    /**
+     * @inheritDoc
+     */
+    protected function createHandler(Transport $transport): OperationHandlerInterface
+    {
+        return new BetWinMiniGameHandler(
+            $transport
+        );
+    }
+}
